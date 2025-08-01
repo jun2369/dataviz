@@ -1,8 +1,94 @@
-/* eslint-disable */
-/* @ts-nocheck */
 import React, { useState, useMemo, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+
+// 定义数据类型接口
+interface DataRow {
+  [key: string]: any;
+  // Receiving 相关字段
+  RECEIVEQUANTITY?: string | number;
+  'Receive Quantity'?: string | number;
+  TRANSACTIONDATE?: string | Date;
+  'Transaction Date'?: string | Date;
+  TransactionDate?: string | Date;
+  OPERATORID?: string;
+  'Operator ID'?: string;
+  操作员?: string;
+  操作人?: string;
+  操作时间?: string | Date;
+  包裹号?: string;
+  子包裹号?: string;
+  // Picking 相关字段
+  拣货时间?: string | Date;
+  拣货人?: string;
+  // 其他可能的字段
+  日期?: string | Date;
+  时间?: string | Date;
+  接收数量?: string | number;
+  数量?: string | number;
+}
+
+interface FileData {
+  name: string;
+  data: DataRow[];
+  preloaded?: boolean;
+}
+
+interface ChartData {
+  operator: string;
+  total: number;
+}
+
+interface PieData {
+  name: string;
+  value: number;
+}
+
+interface WorkingHoursData {
+  operator: string;
+  hours: number;
+}
+
+interface ProcessedData {
+  barData: ChartData[];
+  pieData: PieData[];
+  total: number;
+  workingHoursData: WorkingHoursData[];
+}
+
+interface SummaryDataRow {
+  month: string;
+  receiving: number;
+  putaway: number;
+  picking: number;
+  packing: number;
+  total: number;
+}
+
+interface DateOptions {
+  years: number[];
+  months: number[];
+  days: number[];
+}
+
+interface MonthlyStats {
+  [month: string]: {
+    receiving: Set<string>;
+    putaway: Set<string>;
+    picking: Set<string>;
+    packing: Set<string>;
+  };
+}
+
+interface OperatorMonthlyStats {
+  [operator: string]: {
+    [month: string]: number;
+  };
+}
+
+interface GroupedByOperator {
+  [operator: string]: Date[];
+}
 
 const DataVisualizationApp = () => {
   // 登录状态
@@ -12,18 +98,18 @@ const DataVisualizationApp = () => {
   const [loginError, setLoginError] = useState('');
 
   // 数据状态
-  const [files, setFiles] = useState<any[]>([]);
-  const [receivingData, setReceivingData] = useState<any[]>([]);
-  const [putawayData, setPutawayData] = useState<any[]>([]);
-  const [pickingData, setPickingData] = useState<any[]>([]);
-  const [packingData, setPackingData] = useState<any[]>([]);
+  const [files, setFiles] = useState<FileData[]>([]);
+  const [receivingData, setReceivingData] = useState<DataRow[]>([]);
+  const [putawayData, setPutawayData] = useState<DataRow[]>([]);
+  const [pickingData, setPickingData] = useState<DataRow[]>([]);
+  const [packingData, setPackingData] = useState<DataRow[]>([]);
   const [selectedYear, setSelectedYear] = useState<number | null>(null);
   const [selectedMonth, setSelectedMonth] = useState<number | null>(null);
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('receiving');
   const [dataLoaded, setDataLoaded] = useState(false);
-  const [workingHoursInterval, setWorkingHoursInterval] = useState(15); // 新增：工作时长间隔选择
+  const [workingHoursInterval, setWorkingHoursInterval] = useState(15);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8', '#FF6B6B', '#4ECDC4', '#45B7D1'];
@@ -53,26 +139,35 @@ const DataVisualizationApp = () => {
     const loadPreloadedFiles = async () => {
       setIsLoading(true);
       
+      // 检查 window.fs 是否存在
+      const windowWithFS = window as any;
+      if (!windowWithFS.fs || !windowWithFS.fs.readFile) {
+        console.log('文件系统API不可用，跳过预加载文件');
+        setDataLoaded(true);
+        setIsLoading(false);
+        return;
+      }
+      
       for (const fileName of PRELOADED_FILES) {
         try {
-          const fileData = await (window as any).fs.readFile(fileName);
+          const fileData = await windowWithFS.fs.readFile(fileName);
           const workbook = XLSX.read(fileData, { type: 'array', cellDates: true });
           const sheetName = workbook.SheetNames[0];
           const worksheet = workbook.Sheets[sheetName];
-          const jsonData = XLSX.utils.sheet_to_json(worksheet, { 
+          const jsonData = XLSX.utils.sheet_to_json<DataRow>(worksheet, { 
             raw: false,
             dateNF: 'yyyy-mm-dd'
           });
           
           const lowerFileName = fileName.toLowerCase();
           if (lowerFileName.includes('packagereceive') || lowerFileName.includes('receiving')) {
-            setReceivingData(prev => [...jsonData]);
+            setReceivingData([...jsonData]);
           } else if (lowerFileName.includes('putaway')) {
-            setPutawayData(prev => [...jsonData]);
+            setPutawayData([...jsonData]);
           } else if (lowerFileName.includes('picking')) {
-            setPickingData(prev => [...jsonData]);
+            setPickingData([...jsonData]);
           } else if (lowerFileName.includes('packing') || lowerFileName.includes('combinepack')) {
-            setPackingData(prev => [...jsonData]);
+            setPackingData([...jsonData]);
           }
           
           setFiles(prev => [...prev, { name: fileName, data: jsonData, preloaded: true }]);
@@ -113,7 +208,7 @@ const DataVisualizationApp = () => {
           const workbook = XLSX.read(data, { type: 'array', cellDates: true });
           const sheetName = workbook.SheetNames[0];
           const worksheet = workbook.Sheets[sheetName];
-          const jsonData = XLSX.utils.sheet_to_json(worksheet, { 
+          const jsonData = XLSX.utils.sheet_to_json<DataRow>(worksheet, { 
             raw: false,
             dateNF: 'yyyy-mm-dd'
           });
@@ -132,7 +227,8 @@ const DataVisualizationApp = () => {
             setPackingData(prev => [...prev, ...jsonData]);
             setActiveTab('packing');
           } else {
-            if (jsonData[0] && (jsonData[0]['RECEIVEQUANTITY'] || jsonData[0]['Receive Quantity'])) {
+            const firstRow = jsonData[0];
+            if (firstRow && (firstRow.RECEIVEQUANTITY || firstRow['Receive Quantity'])) {
               setReceivingData(prev => [...prev, ...jsonData]);
               setActiveTab('receiving');
             } else {
@@ -154,13 +250,13 @@ const DataVisualizationApp = () => {
     }
   };
 
-  const getDateOptions = (data: any[], dataType: string) => {
-    const years = new Set();
-    const months = new Set();
-    const days = new Set();
+  const getDateOptions = (data: DataRow[], dataType: string): DateOptions => {
+    const years = new Set<number>();
+    const months = new Set<number>();
+    const days = new Set<number>();
     
     data.forEach(row => {
-      let dateStr;
+      let dateStr: string | Date | undefined;
       
       if (dataType === 'picking') {
         dateStr = row['拣货时间'];
@@ -168,13 +264,13 @@ const DataVisualizationApp = () => {
       } else if (dataType === 'packing') {
         dateStr = row['操作时间'];
       } else {
-        dateStr = row['TRANSACTIONDATE'] || row['Transaction Date'] || row['TransactionDate'] || 
+        dateStr = row.TRANSACTIONDATE || row['Transaction Date'] || row.TransactionDate || 
                  row['操作时间'] || row['日期'] || row['时间'];
       }
       
       if (!dateStr) return;
       
-      let dateValue;
+      let dateValue: Date | undefined;
       if (typeof dateStr === 'string') {
         dateValue = new Date(dateStr);
         if (isNaN(dateValue.getTime())) {
@@ -202,15 +298,15 @@ const DataVisualizationApp = () => {
     });
     
     return {
-      years: Array.from(years).sort(),
-      months: Array.from(months).sort(),
-      days: Array.from(days).sort()
+      years: Array.from(years).sort((a, b) => a - b),
+      months: Array.from(months).sort((a, b) => a - b),
+      days: Array.from(days).sort((a, b) => a - b)
     };
   };
 
-  const filterDataByDate = (data: any[], dataType: string) => {
+  const filterDataByDate = (data: DataRow[], dataType: string): DataRow[] => {
     return data.filter(row => {
-      let dateStr;
+      let dateStr: string | Date | undefined;
       
       if (dataType === 'picking') {
         dateStr = row['拣货时间'];
@@ -218,13 +314,13 @@ const DataVisualizationApp = () => {
       } else if (dataType === 'packing') {
         dateStr = row['操作时间'];
       } else {
-        dateStr = row['TRANSACTIONDATE'] || row['Transaction Date'] || row['TransactionDate'] || 
+        dateStr = row.TRANSACTIONDATE || row['Transaction Date'] || row.TransactionDate || 
                  row['操作时间'] || row['日期'] || row['时间'];
       }
       
       if (!dateStr) return false;
       
-      let dateValue;
+      let dateValue: Date | undefined;
       if (typeof dateStr === 'string') {
         dateValue = new Date(dateStr);
         if (isNaN(dateValue.getTime())) {
@@ -248,8 +344,8 @@ const DataVisualizationApp = () => {
   };
 
   // 计算汇总数据
-  const calculateSummaryData = () => {
-    const summaryByMonth = {};
+  const calculateSummaryData = (): SummaryDataRow[] => {
+    const summaryByMonth: MonthlyStats = {};
     
     // 处理 Receiving 数据
     receivingData.forEach(row => {
@@ -268,7 +364,7 @@ const DataVisualizationApp = () => {
           };
         }
         const packageId = row['包裹号'];
-        if (packageId) {
+        if (packageId && typeof packageId === 'string') {
           summaryByMonth[monthKey].receiving.add(packageId);
         }
       }
@@ -291,7 +387,7 @@ const DataVisualizationApp = () => {
           };
         }
         const packageId = row['子包裹号'];
-        if (packageId) {
+        if (packageId && typeof packageId === 'string') {
           summaryByMonth[monthKey].putaway.add(packageId);
         }
       }
@@ -300,7 +396,7 @@ const DataVisualizationApp = () => {
     // 处理 Picking 数据 - 只统计有拣货时间的
     pickingData.forEach(row => {
       const dateStr = row['拣货时间'];
-      if (!dateStr) return; // 跳过没有拣货时间的记录
+      if (!dateStr) return;
       
       const dateValue = new Date(dateStr);
       if (!isNaN(dateValue.getTime())) {
@@ -314,7 +410,7 @@ const DataVisualizationApp = () => {
           };
         }
         const packageId = row['子包裹号'];
-        if (packageId) {
+        if (packageId && typeof packageId === 'string') {
           summaryByMonth[monthKey].picking.add(packageId);
         }
       }
@@ -337,7 +433,7 @@ const DataVisualizationApp = () => {
           };
         }
         const packageId = row['子包裹号'];
-        if (packageId) {
+        if (packageId && typeof packageId === 'string') {
           summaryByMonth[monthKey].packing.add(packageId);
         }
       }
@@ -353,16 +449,14 @@ const DataVisualizationApp = () => {
         packing: data.packing.size,
         total: data.receiving.size + data.putaway.size + data.picking.size + data.packing.size
       }))
-      .sort((a, b) => b.month.localeCompare(a.month)); // 按月份倒序排序
+      .sort((a, b) => b.month.localeCompare(a.month));
     
     return tableData;
   };
 
   // 过滤汇总数据
-  const filterSummaryData = () => {
+  const filterSummaryData = (): SummaryDataRow[] => {
     const allData = calculateSummaryData();
-    
-    // 汇总数据表格始终显示所有数据，不受时间筛选器影响
     return allData;
   };
 
@@ -372,26 +466,26 @@ const DataVisualizationApp = () => {
   }, [receivingData, putawayData, pickingData, packingData]);
 
   // 计算工作时长
-  const calculateWorkingHours = (data: any[], dataType: string) => {
+  const calculateWorkingHours = (data: DataRow[], dataType: string): WorkingHoursData[] => {
     const filtered = filterDataByDate(data, dataType);
-    const operatorHours = {};
+    const operatorHours: { [key: string]: number } = {};
     
     // 按操作员分组
-    const groupedByOperator = {};
+    const groupedByOperator: GroupedByOperator = {};
     filtered.forEach(row => {
-      let operator;
-      let timeStr;
+      let operator: string;
+      let timeStr: string | Date | undefined;
       
       if (dataType === 'picking') {
-        operator = row['拣货人'] || 'Unknown';
+        operator = String(row['拣货人'] || 'Unknown');
         timeStr = row['拣货时间'];
         if (!timeStr) return;
       } else if (dataType === 'packing') {
-        operator = row['操作人'] || 'Unknown';
+        operator = String(row['操作人'] || 'Unknown');
         timeStr = row['操作时间'];
       } else {
-        operator = row['OPERATORID'] || row['Operator ID'] || row['操作员'] || row['操作人'] || 'Unknown';
-        timeStr = row['TRANSACTIONDATE'] || row['Transaction Date'] || row['TransactionDate'] || 
+        operator = String(row.OPERATORID || row['Operator ID'] || row['操作员'] || row['操作人'] || 'Unknown');
+        timeStr = row.TRANSACTIONDATE || row['Transaction Date'] || row.TransactionDate || 
                   row['操作时间'] || row['日期'] || row['时间'];
       }
       
@@ -399,7 +493,7 @@ const DataVisualizationApp = () => {
         groupedByOperator[operator] = [];
       }
       
-      let dateValue;
+      let dateValue: Date | undefined;
       if (typeof timeStr === 'string') {
         dateValue = new Date(timeStr);
       } else if (timeStr instanceof Date) {
@@ -414,11 +508,11 @@ const DataVisualizationApp = () => {
     // 计算每个操作员的有效工作时长
     Object.entries(groupedByOperator).forEach(([operator, times]) => {
       // 按时间排序
-      times.sort((a, b) => a - b);
+      times.sort((a, b) => a.getTime() - b.getTime());
       
       let totalMinutes = 0;
       for (let i = 1; i < times.length; i++) {
-        const timeDiff = (times[i] - times[i-1]) / 1000 / 60; // 转换为分钟
+        const timeDiff = (times[i].getTime() - times[i-1].getTime()) / 1000 / 60;
         
         // 根据选择的时间间隔计算有效工作时长
         if (timeDiff <= workingHoursInterval) {
@@ -442,33 +536,41 @@ const DataVisualizationApp = () => {
     return hourData;
   };
 
-  const processData = (data: any[], quantityField: string | null = null, dataType: string = 'default') => {
+  const processData = (data: DataRow[], quantityField: string | null = null, dataType: string = 'default'): ProcessedData => {
     const filtered = filterDataByDate(data, dataType);
-    const operatorMonthlyStats = {};
-    const monthlyTotalStats = {};
+    const operatorMonthlyStats: OperatorMonthlyStats = {};
+    const monthlyTotalStats: { [month: string]: number } = {};
     
     filtered.forEach(row => {
-      let operator;
-      let dateStr;
+      let operator: string;
+      let dateStr: string | Date | undefined;
       
       if (dataType === 'picking') {
-        operator = row['拣货人'] || 'Unknown';
+        operator = String(row['拣货人'] || 'Unknown');
         dateStr = row['拣货时间'];
         if (!dateStr) return;
       } else if (dataType === 'packing') {
-        operator = row['操作人'] || 'Unknown';
+        operator = String(row['操作人'] || 'Unknown');
         dateStr = row['操作时间'];
       } else {
-        operator = row['OPERATORID'] || row['Operator ID'] || row['操作员'] || row['操作人'] || 'Unknown';
-        dateStr = row['TRANSACTIONDATE'] || row['Transaction Date'] || row['TransactionDate'] || 
+        operator = String(row.OPERATORID || row['Operator ID'] || row['操作员'] || row['操作人'] || 'Unknown');
+        dateStr = row.TRANSACTIONDATE || row['Transaction Date'] || row.TransactionDate || 
                  row['操作时间'] || row['日期'] || row['时间'];
       }
       
-      const quantity = quantityField ? 
-        parseInt(row[quantityField] || row['Receive Quantity'] || row['接收数量'] || row['数量'] || '1') : 1;
+      let quantity = 1;
+      if (quantityField && row[quantityField]) {
+        quantity = parseInt(String(row[quantityField])) || 1;
+      } else if (row['Receive Quantity']) {
+        quantity = parseInt(String(row['Receive Quantity'])) || 1;
+      } else if (row['接收数量']) {
+        quantity = parseInt(String(row['接收数量'])) || 1;
+      } else if (row['数量']) {
+        quantity = parseInt(String(row['数量'])) || 1;
+      }
       
       if (dateStr) {
-        let dateValue;
+        let dateValue: Date | undefined;
         if (typeof dateStr === 'string') {
           dateValue = new Date(dateStr);
         } else if (dateStr instanceof Date) {
@@ -494,7 +596,7 @@ const DataVisualizationApp = () => {
       }
     });
     
-    const operatorTotals = {};
+    const operatorTotals: { [operator: string]: number } = {};
     Object.entries(operatorMonthlyStats).forEach(([operator, months]) => {
       operatorTotals[operator] = Object.values(months).reduce((sum, val) => sum + val, 0);
     });
@@ -504,7 +606,7 @@ const DataVisualizationApp = () => {
       .sort((a, b) => b.total - a.total)
       .slice(0, 10);
     
-    const pieData = [];
+    const pieData: PieData[] = [];
     if (selectedMonth) {
       const monthKey = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
       Object.entries(operatorMonthlyStats).forEach(([operator, months]) => {
@@ -550,7 +652,7 @@ const DataVisualizationApp = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [packingData, selectedYear, selectedMonth, selectedDay, workingHoursInterval]);
 
-  const getCurrentData = () => {
+  const getCurrentData = (): DataRow[] => {
     switch (activeTab) {
       case 'receiving': return receivingData;
       case 'putaway': return putawayData;
@@ -560,7 +662,7 @@ const DataVisualizationApp = () => {
     }
   };
 
-  const getCurrentProcessedData = () => {
+  const getCurrentProcessedData = (): ProcessedData => {
     switch (activeTab) {
       case 'receiving': return processReceivingData;
       case 'putaway': return processPutawayData;
@@ -570,7 +672,7 @@ const DataVisualizationApp = () => {
     }
   };
 
-  const getTabTitle = () => {
+  const getTabTitle = (): string => {
     switch (activeTab) {
       case 'receiving': return 'Package Receiving Analysis';
       case 'putaway': return 'Putaway Scan Analysis';
@@ -585,24 +687,24 @@ const DataVisualizationApp = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [receivingData, putawayData, pickingData, packingData, selectedYear, selectedMonth, activeTab]);
 
-  const sidebarStyle = {
+  const sidebarStyle: React.CSSProperties = {
     width: '280px',
     backgroundColor: '#f3f4f6',
     padding: '20px',
     height: '100vh',
-    overflowY: 'auto' as const,
+    overflowY: 'auto',
     flexShrink: 0
   };
 
-  const mainContentStyle = {
+  const mainContentStyle: React.CSSProperties = {
     flex: 1,
     background: 'linear-gradient(135deg, #ffffff 0%, #e0f2fe 50%, #f3f4f6 100%)',
     padding: '30px',
     height: '100vh',
-    overflowY: 'auto' as const
+    overflowY: 'auto'
   };
 
-  const tabStyle = (isActive: boolean) => ({
+  const tabStyle = (isActive: boolean): React.CSSProperties => ({
     padding: '12px 20px',
     marginBottom: '8px',
     backgroundColor: isActive ? '#3b82f6' : '#ffffff',
@@ -616,7 +718,7 @@ const DataVisualizationApp = () => {
     justifyContent: 'space-between'
   });
 
-  const hasData = (type: string) => {
+  const hasData = (type: string): boolean => {
     switch (type) {
       case 'receiving': return receivingData.length > 0;
       case 'putaway': return putawayData.length > 0;
@@ -994,7 +1096,7 @@ const DataVisualizationApp = () => {
                         cx="50%"
                         cy="50%"
                         labelLine={false}
-                        label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                        label={({ name, percent }) => `${name}: ${((percent || 0) * 100).toFixed(0)}%`}
                         outerRadius={100}
                         fill="#8884d8"
                         dataKey="value"
@@ -1276,4 +1378,3 @@ const DataVisualizationApp = () => {
 };
 
 export default DataVisualizationApp;
-/* eslint-enable */
