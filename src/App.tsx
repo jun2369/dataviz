@@ -1101,7 +1101,7 @@ const DataVisualizationApp = () => {
                         fill="#8884d8"
                         dataKey="value"
                       >
-                        {getCurrentProcessedData().pieData.map((entry, index) => (
+                        {getCurrentProcessedData().pieData.map((_, index) => (
                           <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                         ))}
                       </Pie>
